@@ -1,8 +1,6 @@
-# Hack The Box Writeups 🧠🔍
+# Red Team Writeups
 
-This repository contains writeups for various **Hack The Box (HTB)** labs I've completed across the **Red Team** path
-
-Each writeup includes key steps, commands used, and lessons learned — all written with a focus on learning, clarity, and reproducibility.
+This repository contains writeups for various Red Team labs. Each writeup includes key steps, commands used, and lessons learned — all written with a focus on learning, clarity, and reproducibility.
 
 ---
 
