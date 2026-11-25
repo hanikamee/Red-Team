@@ -13,7 +13,7 @@ Each folder contains:
 
 ---
 
-## 🛠️ Goals
+## Goals
 
 - Practice offensive and defensive techniques
 - Document approaches to each challenge
@@ -21,13 +21,13 @@ Each folder contains:
 
 ---
 
-## 📌 Notes
+## Notes
 
 - These writeups are for **educational purposes only**.
 - All labs were completed on legal, sandboxed environments provided by different cyber ranges
 
 --- 
 
-## 📚 Coming Soon
+## Coming Soon
 
 - More Red Team lab writeups!
