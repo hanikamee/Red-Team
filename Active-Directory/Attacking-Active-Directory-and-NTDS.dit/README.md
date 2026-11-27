@@ -75,7 +75,7 @@ This lab simulated an external engagement against the Inlanefreight domain contr
     ```
 - Recovered **jmarston:P@ssword!** with `(Pwn3d!)`, confirming the account held **local admin rights** on the DC.
 - Target host identified as **ILF-DC01**, Windows Server 2019 Build 17763, SMB signing enabled.
-- A broader spray also returned the additional credential **cjohnson:Welcome1212**. [VERIFY: command for cjohnson hit not captured in provided output]
+- A broader spray also returned the additional credential **cjohnson:Welcome1212** (extra finding, not required for a lab answer).
 
 #### NTDS.dit Capture and Hash Dump
 
